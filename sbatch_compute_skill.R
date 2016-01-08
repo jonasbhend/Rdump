@@ -227,6 +227,13 @@ fc.times <- fc.times[is.in.obs]
 ## number of years
 nyears <- length(fcfiles)
 years <- as.numeric(names(fc.times))
+if(length(grep('none', method)) == 1) {
+  myears <- if (length(years) > 30) years[years %in% 1981:2010] else years  
+} else {
+  mtmp <- as.numeric(strsplit(strsplit(method, '_')[[1]][2], '-')[[1]])
+  myears <- mtmp[1]:mtmp[2]
+} 
+
 
 ## get the forecast ensemble members
 nens <- min(sapply(fc.con, function(x) x$dim[[which(! names(x$dim) %in% grep("tim|lon|lat|ncells|nb2", names(x$dim), value=TRUE))]]$len)) 
@@ -375,8 +382,8 @@ for (seasonal in seasonals){
           for (lai in 1:nlat){
             if (any(!is.na(obs.seas[,loi,lai,]))){
               fcst.ccr[,loi,lai,,] <- aperm(debias(
-                fcst=aperm(fcst.seas[,loi, lai,,which(years < 2011)], c(1,3,2)),
-                obs=obs.seas[,loi,lai,which(years < 2011)],
+                fcst=aperm(fcst.seas[,loi, lai,,which(years %in% myears)], c(1,3,2)),
+                obs=obs.seas[,loi,lai,which(years %in% myears)],
                 fcst.out=aperm(fcst.seas[,loi,lai,,], c(1,3,2)),
                 method='ccr', 
                 crossval=crossval,
