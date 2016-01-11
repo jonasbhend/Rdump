@@ -288,7 +288,8 @@ for (seasonal in seasonals){
     } else {
       nred <- 2
     }
-    fcst.seas <- ref.seas <- array(NA, dim(ffcst) - c(nred,0,0,0,0))
+    fcst.seas <- array(NA, dim(ffcst) - c(nred,0,0,0,0))
+    ref.seas <- array(NA, dim(rref) - c(nred,0,0,0,0))
     obs.seas <- array(NA, dim(obs) - c(nred,0,0,0))
     for (i in 1:(nrow(ffcst) - 2)){
       fcst.seas[i,,,,] <- colMeans(ffcst[i+0:2,,,,,drop=F], dims=1)
