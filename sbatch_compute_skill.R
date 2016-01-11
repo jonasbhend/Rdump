@@ -56,7 +56,8 @@ nc_time <- function(nc){
 
 ## scores <- c('Ens2AFC', 'EnsRpss', 'FairRpss', 'EnsCrpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'EnsSprErr', 'EnsRocss')
 
-scores <- c('EnsTrend', 'EnsCond', 'EnsVarlog', 'FairCrps', 'Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
+## scores <- c('EnsTrend', 'EnsCond', 'EnsVarlog', 'FairCrps', 'Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
+scores <- c('Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
 
 scorelist <- list(Ens2AFC='generalized discrimination score', 
                   EnsCorr='correlation', 
@@ -308,15 +309,25 @@ for (seasonal in seasonals){
   
   if (seasonal){
     ## compute three-monthly aggregates
-    fcst.seas <- array(NA, dim(ffcst) - c(2,0,0,0,0))
-    obs.seas <- array(NA, dim(obs) - c(2,0,0,0))
-    for (i in 1:nrow(fcst.seas)){
+    ## compute three-monthly aggregates
+    if (grid == 'EAF-22'){
+      nred <- 0
+    } else {
+      nred <- 2
+    }
+    fcst.seas <- array(NA, dim(ffcst) - c(nred,0,0,0,0))
+    obs.seas <- array(NA, dim(obs) - c(nred,0,0,0))
+    for (i in 1:(nrow(ffcst) - 2)){
       fcst.seas[i,,,,] <- colMeans(ffcst[i+0:2,,,,,drop=F], dims=1)
       obs.seas[i,,,] <- colMeans(obs[i + 0:2,,,,drop=F], dims=1)
     }
+    if (grid == 'EAF-22'){
+      fcst.seas[nrow(fcst.seas),,,,] <- colMeans(ffcst[2:5,,,,,drop=F], dims=1)
+      obs.seas[nrow(obs.seas),,,] <- colMeans(obs[2:5,,,,drop=F], dims=1)      
+    }
     
     ## rearrange time for output
-    fcst.seastimes <- sapply(fc.times, function(x) format(x[setdiff(1:ncomplete, 1:2)], '%Y-%m-%d'))
+    fcst.seastimes <- sapply(fc.times, function(x) format(if (grid == 'EAF-22') x[setdiff(1:ncomplete, 1:2)][c(seq(1,ncomplete-2), NA, 3)] else x[setdiff(1:ncomplete, 1:2)], '%Y-%m-%d'))
     fcst.seastimes <- array(0, dim(fcst.seastimes)) + as.Date(fcst.seastimes)  
   } else {
     fcst.seas <- ffcst[1:ncomplete,,,,,drop=F]
