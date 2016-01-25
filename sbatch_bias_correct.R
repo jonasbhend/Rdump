@@ -65,12 +65,12 @@ args <- commandArgs(trailingOnly=TRUE)
 
 ## check if there are any command line arguments
 if (length(args) == 0 | mode(args) == 'function'){
-  args <- c('ecmwf-system4', 
-            'E-OBS',
-            'pr', 
-            'eobs0.44', 
+  args <- c('DWD-CCLM4-8-21', 
+            'WFDEI',
+            'tasmax', 
+            'EAF-22', 
             'fastqqmap', 
-            '11')
+            '05')
 } else if (length(args) < 5){
   stop('Not enough command line arguments')
 }
