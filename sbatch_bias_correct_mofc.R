@@ -1,38 +1,42 @@
 library(myhelpers)
 library(biascorrection)
+library(devtools)
 
 args <- commandArgs(TRUE)
-filenum <- as.numeric(args[1])
+if (length(args) == 0){
+  args <- c("/store/msclim/bhendj/MOFC/eobs0.44/weekly/tas/none/20140508_tas_eobs0.44.nc", "smooth-crossval1")
+}
+fcfile <- args[1]
 method <- args[2]
 
-print(filenum)
+print(fcfile)
 print(method)
 
-## deparse method
+## deparse method and file
 crossval <- length(grep("crossval", method)) == 1
 blocklength <- ifelse(crossval, as.numeric(gsub(".*crossval", "", method)), 1)
 forward <- length(grep("forward", method)) == 1
-
+mofcpath <- dirname(fcfile)
+fileparts <- strsplit(fcfile, '/')[[1]]
+granularity <- fileparts[length(fileparts) - 3]
 
 ## observations
-obsfile <- '/store/msclim/bhendj/EUPORIAS/E-OBS/eobs0.44/daily/tas/tg_0.44deg_rot_v11.0.nc'
+obsfile <- list.files(paste0('/store/msclim/bhendj/EUPORIAS/E-OBS/eobs0.44/', granularity, '/tas'),
+                      pattern='.nc', full.names=TRUE)
 obsname <- "E-OBS"
 ncobs <- nc_open(obsfile)
 obs.time <- as.Date(nc_time(ncobs))
 starti <- max(which(obs.time <= as.Date("1990-01-01")))
 obs.time <- obs.time[starti:length(obs.time)]
-otmp <- ncvar_get(ncobs, 'tg', start=c(1,1,starti)) + 273.15
+obsvar <- names(ncobs$var)[grep("tg|tas", names(ncobs$var))]
+otmp <- ncvar_get(ncobs, obsvar, start=c(1,1,starti)) + 273.15
 
-## forecast files
-mofcpath <- '/store/msclim/bhendj/MOFC/eobs0.44/daily/tas/none'
-fcfiles <- list.files(mofcpath, full.names=T)
-fcfile <- fcfiles[filenum]
 
 ## get data
 nc <- nc_open(fcfile)
 hdate <- as.Date(as.character(ncvar_get(nc, 'hdate')), format="%Y%m%d")
 fcst <- ncvar_get(nc, 'tas')
-fcst <- aperm(array(fcst, c(nrow(fcst), ncol(fcst), 20, 5, 32)), c(1,2,5,3,4))
+fcst <- aperm(array(fcst, c(nrow(fcst), ncol(fcst), 20, 5, dim(fcst)[4])), c(1,2,5,3,4))
 fct <- as.Date(nc_time(nc))
 fc.time <- outer(hdate[1:20], fct - fct[1], '+')
 o.i <- obs.time %in% fc.time
@@ -41,7 +45,7 @@ obs <- array(otmp[,,o.i], dim(fcst)[-5])
 ## get year range
 deb.years <- range(as.numeric(format(fc.time[,1], '%Y')))
 ## set-up method string
-method.string <- paste(method, paste(deb.years, collapse='-'), obsname, sep="_")
+method.string <- paste(method, obsname, sep="_")
 
 ## set up output directory
 outdir <- gsub("none", method.string, mofcpath)
@@ -59,7 +63,7 @@ for (i in 1:nrow(fcst)){
     if (mask[i,j]){
       fcst.debias[i,j,,,] <- debias(fcst=fcst[i,j,,,], obs=obs[i,j,,],
                                     method=gsub("-.*", "", method), 
-                                    fc.time=fc.time, 
+                                    fc.time=t(fc.time), 
                                     crossval=crossval,
                                     blocklength=blocklength,
                                     forward=forward)
@@ -72,6 +76,11 @@ fcst.debias <- aperm(array(fcst.debias, c(dim(fcst)[1:3], prod(dim(fcst)[4:5])))
 ## write output file
 nc_write(fcfile, paste(outdir, outfile, sep='/'), "tas", fcst.debias)
 
-print("succesfully reached end of script")
+## add documentation in attributes
+tp <- session_info()
+biasversion <- tp$packages[tp$packages$package == "biascorrection", ]
+system(paste0("ncatted -h -a comment,global,o,c,'Bias corrected using method ", method, " against ", obsname, "\nfrom package ", biasversion$package, " version ", biasversion$version, " installed on ", biasversion$date, "\nusing hindcasts initialized in ", paste(deb.years, collapse='-'), "' ", paste(outdir, outfile, sep='/')))
+
+print("successfully reached end of script")
 
 q(save = "no")
