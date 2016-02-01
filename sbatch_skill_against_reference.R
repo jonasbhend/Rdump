@@ -199,7 +199,8 @@ years <- as.numeric(names(fc.times))
 if(length(grep('none', method)) == 1) {
   myears <- years  
 } else {
-  mtmp <- as.numeric(strsplit(strsplit(method, '_')[[1]][2], '-')[[1]])
+  mtmp <- strsplit(method, '_')[[1]]
+  mtmp <- as.numeric(strsplit(mtmp[length(mtmp) - 1], '-')[[1]])
   myears <- mtmp[1]:mtmp[2]
 } 
 
