@@ -101,12 +101,12 @@ scratchdir <- Sys.getenv('SCRATCH')
 args <- commandArgs(trailingOnly=TRUE)
 ## check if there are any command line arguments
 if (length(args) == 0){
-  args <- c('ecmwf-system4', 
-            'ERA-INT',
-            'tas',
-            'global2',
-            'fastqqmap-forward_????-????_ERA-INT',
-            '11',
+  args <- c('DWD-CCLM4-8-21', 
+            'WFDEI',
+            'tasmax',
+            'EAF-22',
+            'fastqqmap_????-????_WFDEI',
+            '05',
             TRUE,
             FALSE,
             FALSE)
@@ -209,13 +209,13 @@ names(fc.times) <- sapply(fc.times, function(x) format(x[1], '%Y'))
 
 ## check whether forecasts are in obs
 is.in.obs <- sapply(fc.times, function(x) all(x[1:ncomplete] %in% obstime))
-if (mean(is.in.obs) < 0.5){
-  obstime <- obstime + 1
-  is.in.obs <- sapply(fc.times, function(x) all(x[1:ncomplete] %in% obstime))
-}
 ## hack to account for missing day in DWD-CCLM4-8-21
 if (model == 'DWD-CCLM4-8-21'){
   is.in.obs <- sapply(fc.times, function(x) all(x[1:ncomplete] %in% obstime | x[1:ncomplete] %in% obstime -1))  
+}
+if (mean(is.in.obs) < 0.5){
+  obstime <- obstime + 1
+  is.in.obs <- sapply(fc.times, function(x) all(x[1:ncomplete] %in% obstime))
 }
 
 stopifnot(sum(!is.in.obs) < 3)
@@ -231,7 +231,8 @@ years <- as.numeric(names(fc.times))
 if(length(grep('none', method)) == 1) {
   myears <- if (length(years) > 30) years[years %in% 1981:2010] else years  
 } else {
-  mtmp <- as.numeric(strsplit(strsplit(method, '_')[[1]][2], '-')[[1]])
+  mtmp <- strsplit(method, '_')[[1]]
+  mtmp <- as.numeric(strsplit(mtmp[length(mtmp) - 1], '-')[[1]])
   myears <- mtmp[1]:mtmp[2]
 } 
 
