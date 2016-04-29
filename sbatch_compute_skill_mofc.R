@@ -37,7 +37,8 @@ ncobs <- nc_open(obsfile)
 obs.time <- as.Date(nc_time(ncobs))
 starti <- max(which(obs.time <= as.Date("1990-01-01")))
 obs.time <- obs.time[starti:length(obs.time)]
-otmp <- ncvar_get(ncobs, 'tg', start=c(1,1,starti)) + 273.15
+varobs <- names(ncobs$var)[grep("tas|tg", names(ncobs$var))]
+otmp <- ncvar_get(ncobs, varobs, start=c(1,1,starti)) + 273.15
 
 
 ## get data
@@ -46,7 +47,8 @@ hdate <- as.Date(as.character(ncvar_get(nc, 'hdate')), format="%Y%m%d")
 fcst <- ncvar_get(nc, 'tas')
 fcst <- aperm(array(fcst, c(nrow(fcst), ncol(fcst), 20, 5, dim(fcst)[4])), c(1,2,5,3,4))
 fct <- as.Date(nc_time(nc))
-fc.time <- outer(hdate[1:20], fct - fct[1], '+')
+fcorig <- as.Date(substr(basename(fcfile), 1, 8), format='%Y%m%d')
+fc.time <- outer(hdate[1:20], fct - fcorig, '+')
 o.i <- obs.time %in% fc.time
 obs <- array(otmp[,,o.i], dim(fcst)[-5])
 
