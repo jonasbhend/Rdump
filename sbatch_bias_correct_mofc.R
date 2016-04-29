@@ -38,7 +38,8 @@ hdate <- as.Date(as.character(ncvar_get(nc, 'hdate')), format="%Y%m%d")
 fcst <- ncvar_get(nc, 'tas')
 fcst <- aperm(array(fcst, c(nrow(fcst), ncol(fcst), 20, 5, dim(fcst)[4])), c(1,2,5,3,4))
 fct <- as.Date(nc_time(nc))
-fc.time <- outer(hdate[1:20], fct - fct[1], '+')
+fcorig <- as.Date(substr(basename(fcfile), 1, 8), format='%Y%m%d')
+fc.time <- outer(hdate[1:20], fct - fcorig, '+')
 o.i <- obs.time %in% fc.time
 obs <- array(otmp[,,o.i], dim(fcst)[-5])
 
