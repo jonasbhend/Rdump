@@ -65,11 +65,11 @@ args <- commandArgs(trailingOnly=TRUE)
 
 ## check if there are any command line arguments
 if (length(args) == 0 | mode(args) == 'function'){
-  args <- c('DWD-CCLM4-8-21', 
-            'WFDEI',
-            'tasmax', 
-            'EAF-22', 
-            'fastqqmap', 
+  args <- c('ecmwf-system4', 
+            'ERA-INT',
+            'tas', 
+            'global2', 
+            'smooth', 
             '05')
 } else if (length(args) < 5){
   stop('Not enough command line arguments')
@@ -126,8 +126,10 @@ stopifnot(sum(duplicated(otimes)) == 0)
 
 ## now exclude all forecast years that are not fully present in obs
 is.in.obs <- sapply(fc.times, function(x) all(x %in% otimes)) 
-## constrain years to 1981-2010, but use all years if less than 25 years are available
+## constrain years to 1981-, but use all years if less than 25 years are available
 if (sum(is.in.obs) > 25) is.in.obs <- is.in.obs & names(fc.times) %in% 1981:2010
+## if (sum(is.in.obs) > 25) is.in.obs <- is.in.obs & names(fc.times) %in% 1981:2014
+
 
 ## exclude forecast years that are not in obs
 ## fcfiles <- fcfiles[is.in.obs]
