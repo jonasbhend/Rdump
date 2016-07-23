@@ -4,7 +4,6 @@
 library(myhelpers) ## ncdf4 and additional functionality
 library(methods)
 
-## initialise
 varlist <- list(tasmin=c('MN2T24', 'mn2t24', 'tmin', 'tasmin', 'tn'),
                 tasmax=c('MX2T24', 'mx2t24', 'tmax', 'tasmax', 'tx'),
                 tas=c('MEAN2T24', 'mean2t24', 'tas', 'tg', 't2m'),
@@ -64,7 +63,16 @@ for (lai in 1:ncol(lsm)){
     fcst <- read_ncdf(fcfiles, index=varname, lai=lai)
   })
   
-  ntim <- dim(fcst)[3]
+  ## hack to get February for leap years
+  singledate <- attr(fcst, 'time')[1:dim(fcst)[3]]
+  if (any(format(singledate, '%m%d') == '0228')){
+    datei <- sort(c(1:length(singledate), which(format(singledate, '%m%d') == '0228')))
+  } else {
+    datei <- 1:length(singledate)
+  }
+  
+  ## time steps (account for leap years)
+  ntim <- length(datei)
   years <- array(as.numeric(format(attr(fcst, 'time'), '%Y')), dim(fcst)[3:4])[1,]
   yearrange <- paste(range(years), collapse='-')
   
@@ -87,7 +95,7 @@ for (lai in 1:ncol(lsm)){
       nc_write(nctempfile=templatefile,
                file=paste0(outdir,'/', outfile),
                varname=NULL,
-               data=t(fcst.pctlsmooth[,pii,]),
+               data=t(fcst.pctlsmooth[datei,pii,]),
                append=(lai > 1), 
                start=c(1,lai,1), count=c(-1,1,ntim))
       
@@ -98,9 +106,11 @@ for (lai in 1:ncol(lsm)){
         nvarname <- names(nc$var)[1]
         nc_close(nc)
         
-        ## fix time units
+        ## fix time units (manually, to account for leap years)
+        refmonth <- format(singledate[1], '%m')
+        refdate <- paste0(ifelse(as.numeric(refmonth) <=2, 1984, 1983), '-', refmonth, '-01 12:00')
         system(paste0("ncatted -h -a units,time,o,c,'days since ", 
-                      attr(fcst,'time')[1], "' ", outdir, '/', outfile))
+                      refdate, "' ", outdir, '/', outfile))
         
         ## fix variable name
         system(paste0("ncrename -h -v ", nvarname, ',', varname, ' ', outdir, '/', outfile))
@@ -113,6 +123,9 @@ for (lai in 1:ncol(lsm)){
   
 }
 
+## write output with statistics
+outstat <- sapply(comp.time, function(y) paste0(round(sum(sapply(y, function(x) x['elapsed']))/60, 1), ' min.'))
+print(outstat)
 
 
 ## say good bye
