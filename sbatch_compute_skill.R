@@ -7,6 +7,10 @@ library(biascorrection)
 ## library(veri)
 library(easyVerification)
 
+SpearCorr <- function(ens, obs, ...){
+  cor(rowMeans(ens), obs, method='spearman', ...)
+}
+
 EnsTrend <- function(ens=ens, obs=obs, ...){
   stopifnot(is.matrix(ens), is.vector(obs), length(obs) == nrow(ens))
   nfcst <- length(obs)
@@ -59,8 +63,11 @@ nc_time <- function(nc){
 ## scores <- c('EnsTrend', 'EnsCond', 'EnsVarlog', 'FairCrps', 'Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
 scores <- c('Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
 
+## scores <- c("Ens2AFC", "FairRpss", "EnsCorr", "SpearCorr")
+
 scorelist <- list(Ens2AFC='generalized discrimination score', 
                   EnsCorr='correlation', 
+                  SpearCorr="Spearman's correlation",                
                   EnsCrpss='continuous ranked probability skill score', 
                   FairCrpss='fair continuous ranked probability skill score', 
                   FairCrps='mean fair continuous ranked probability score',
@@ -86,11 +93,13 @@ scorelist <- list(Ens2AFC='generalized discrimination score',
 
 
 ## scorefunction for use with veriApply
-scorefun <- function(f, o, score, prob=NULL){
+scorefun <- function(f, o, score, prob=NULL, ...){
   if (length(grep('Rps', score)) == 1 | score == 'EnsRocss'){
     prob <-  c(1/3,2/3)    
+    return(veriApply(score, f, o, ensdim=4, tdim=5, prob=prob))
+  } else {
+    return(veriApply(score, f, o, ensdim=4, tdim=5, prob=prob, ...))
   }
-  return(veriApply(score, f, o, ensdim=4, tdim=5, prob=prob))
 }
 
 
@@ -149,11 +158,13 @@ fpath <- paste(dpath, model, grid, 'monthly', index, method, sep='/')
 opath <- paste(dpath, obsname, grid, 'monthly', index, sep='/')
 
 ## get forecast and observation files
-fcfiles <- list.files(fpath, pattern=paste0('^', index, '_....', initmon, '.._.*_',grid,'_',method, '.nc'), full.name=TRUE)
+fcfiles <- list.files(fpath, pattern=paste0('^', index, '_....', initmon, '.._.*_',grid,'_',method, '.nc'), full.name=TRUE)[1:34]
 if (method == "none-forward"){
   fpath <- paste(dpath, model, grid, 'monthly', index, 'none', sep='/')
   fcfiles <- list.files(fpath, pattern=paste0('^', index, '_....', initmon, '.._.*_',grid,'_none.nc'), full.name=TRUE)
 }
+## dirty hack for paper
+## fcfiles <- fcfiles[1:min(34, length(fcfiles))]
 obsfiles <- list.files(opath, pattern=paste0('^', index, '_'), full.name=TRUE)
 
 ## check whether there is at least one of each
@@ -538,7 +549,7 @@ for (seasonal in seasonals){
       for (score in scores){
         ncout <- nc_open(outfile, write=TRUE)
         print(score)
-        print(system.time( sfo <- scorefun(fcst.seas[,,,,yind, drop=F], obs.seas[,,,yind,drop=F], score)))
+        print(system.time( sfo <- scorefun(fcst.seas[,,,,yind, drop=F], obs.seas[,,,yind,drop=F], score, ref.opts=if(crossval) list(crossval=TRUE, blocklength=nblock) else if (forward) "forward" else NULL)))
         if (is.list(sfo)){
           sfo <- lapply(sfo, function(x){
             x[x == -Inf] <- -9999
