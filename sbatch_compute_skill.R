@@ -147,11 +147,13 @@ if (length(args) > 6){
 
 if (length(args) >= 9){
   seasonals <- as.logical(args[8])
-  ccrs <- as.logical(args[9])
+  indmethod <- args[9]
 } else {
   seasonals <- c(FALSE, TRUE)
-  ccrs <- c(FALSE, TRUE)
+  indmethod <- 'none'
 }
+ind.cali <- (indmethod != 'none')
+
 if (length(args) == 10){
   detrends <- as.logical(args[10])
 } else {
@@ -160,7 +162,7 @@ if (length(args) == 10){
 
 ## check scores
 if (whatscores == 'full'){
-  scores <- c('EnsTrend', 'EnsCond', 'EnsVarlog', 'FairCrps', 'Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
+  scores <- c('EnsTrend', 'EnsCond', 'EnsVarlog', 'FairCrps', "CRPSdecomp", 'Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
 } else if (whatscores == 'small') {
   scores <- c("FairCrpss", "EnsCorr", "FairSprErr", "CRPSdecomp")
 } else if (whatscores == 'standard') {
@@ -337,7 +339,7 @@ forward <- length(grep("forward", method)) == 1
 block <- length(grep("block", method)) == 1
 stopifnot(sum(forward, crossval, block) <= 1)
 strategy <- list(nfcst=length(fc.times),
-  type=c("none", 'crossval', 'block', 'forward')[1 + 1*crossval + 2*block + 3*forward])
+                 type=c("none", 'crossval', 'block', 'forward')[1 + 1*crossval + 2*block + 3*forward])
 if (crossval | block) {
   suppressWarnings(strategy$blocklength <- as.numeric(gsub('_.*', '', gsub('.*crossval', '', method))))
   if (is.na(strategy$blocklength)) strategy$blocklength <- 1
@@ -430,230 +432,244 @@ for (seasonal in seasonals){
       }), c(2,3,4,5,1))
     }
     
-    ## loop through raw / CCR forecasts
-    for (is.ccr in ccrs){
+    ## find out whether seasonal/monthly indices need calibration
+    if (ind.cali){
+      fcst.cali <- array(NA, dim(fcst.seas))
+      for (loi in 1:nlon){
+        for (lai in 1:nlat){
+          if (any(!is.na(obs.seas[,loi,lai,]))){
+            fcst.cali[,loi,lai,,] <- aperm(debias(
+              fcst=aperm(fcst.seas[,loi, lai,,which(years %in% myears)], c(1,3,2)),
+              obs=obs.seas[,loi,lai,which(years %in% myears)],
+              fcst.out=aperm(fcst.seas[,loi,lai,,], c(1,3,2)),
+              method=indmethod, 
+              strategy=strategy, 
+              type= if(forward | crossval) "prediction" else "calibration"), c(1,3,2))
+          } ## end of if on missing values in obs
+        } ## end of loop on latitudes
+      } ## end of loop on longitudes
       
-      if (is.ccr){
-        fcst.ccr <- array(NA, dim(fcst.seas))
-        for (loi in 1:nlon){
-          for (lai in 1:nlat){
-            if (any(!is.na(obs.seas[,loi,lai,]))){
-              fcst.ccr[,loi,lai,,] <- aperm(debias(
-                fcst=aperm(fcst.seas[,loi, lai,,which(years %in% myears)], c(1,3,2)),
-                obs=obs.seas[,loi,lai,which(years %in% myears)],
-                fcst.out=aperm(fcst.seas[,loi,lai,,], c(1,3,2)),
-                method='ccr', 
-                strategy=strategy, 
-                type= if(forward | crossval) "prediction" else "calibration"), c(1,3,2))
-            } ## end of if on missing values in obs
-          } ## end of loop on latitudes
-        } ## end of loop on longitudes
-        
-        fcst.seas <- fcst.ccr
-      }
-      
-      ## get number of years that are analysed (reduced for forward calibration)
-      nyears <- dim(obs.seas)[4]
-      ## replace if not succesful
-      ## yind <- seq(if (forward) 16 else 1, nyears)
-      yind <- seq(1,nyears)
-      
-#       ## only write out seasonally aggregated forecasts
-#       if (seasonal){
-#         ## save tercile forecasts to file for later display
-#         fcst.prob <- apply(fcst.seas[,,,,yind, drop=F], 1:3, function(x) if(all(!is.na(x))) convert2prob(t(x), prob=c(1/3,2/3)) else rep(NA, 3*ncol(x))) / nens * 100
-#         fcst.prob <- array(fcst.prob, c(nrow(fcst.prob)/3, 3, dim(fcst.prob)[-1]))
-#         ## set up output file path
-#         Rdatastem <- paste0(paste(index, grid, obsname, method, 'initmon', sep='_'), initmon)
-#         if (detrend) Rdatastem <- gsub(paste0(index, '_'), paste0(index, '_detrend_'), Rdatastem)
-#         if (is.ccr) Rdatastem <- gsub(paste0(index, '_'), paste0(index, '_CCR_'), Rdatastem)
-#         outRdatapath <- paste(dpath, 'forecasts', model, grid, if (seasonal) 'seasonal' else 'monthly', index, method, Rdatastem, sep='/')
-#         if (!file.exists(outRdatapath)) dir.create(outRdatapath, recur=TRUE)
-#         leads <- apply(outer(1:nrow(fcst.seas), 0:2, '+'), 1, paste, collapse='')
-#         for (yi in yind){
-#           for (li in seq(leads)){
-#             fcst <- ffcst[li,,,,yi,drop=F]
-#             ## tricky selection to make sure we select the right 
-#             ## forecast probabilities for the forward method
-#             prob <- fcst.prob[yi - min(yind) + 1,,li,,,drop=F]
-#             fcst.time <- fcst.seastimes[li,yi]
-#             save(fcst, prob, fcst.time,
-#                  file=paste0(outRdatapath, '/', 
-#                              Rdatastem, '_', years[yi], '_', leads[li], '.Rdata'))
-#           }
-#         }
-#         ## save(fcst.seas, fcst.prob, fcst.seastimes, lon, lat, plon, plat, file=outRdata)  
-#       }
-
-      ## set up output file to write to
-      nc <- nc_open(obsfiles[1])
-      nc2 <- nc_open(fcfiles[1])
-      if (length(nc$dim) == 2){
-        ncells.nc <- nc$dim$ncells
-      } else if (length(grep('eobs', grid)) == 1){
-        lon.nc <- nc2$dim$rlon
-        lat.nc <- nc2$dim$rlat    
+      fcst.seas <- fcst.cali
+      gc()
+    }
+    
+    ## get number of years that are analysed (reduced for forward calibration)
+    nyears <- dim(obs.seas)[4]
+    ## replace if not succesful
+    ## yind <- seq(if (forward) 16 else 1, nyears)
+    yind <- seq(1,nyears)
+    
+    #       ## only write out seasonally aggregated forecasts
+    #       if (seasonal){
+    #         ## save tercile forecasts to file for later display
+    #         fcst.prob <- apply(fcst.seas[,,,,yind, drop=F], 1:3, function(x) if(all(!is.na(x))) convert2prob(t(x), prob=c(1/3,2/3)) else rep(NA, 3*ncol(x))) / nens * 100
+    #         fcst.prob <- array(fcst.prob, c(nrow(fcst.prob)/3, 3, dim(fcst.prob)[-1]))
+    #         ## set up output file path
+    #         Rdatastem <- paste0(paste(index, grid, obsname, method, 'initmon', sep='_'), initmon)
+    #         if (detrend) Rdatastem <- gsub(paste0(index, '_'), paste0(index, '_detrend_'), Rdatastem)
+    #         if (is.ccr) Rdatastem <- gsub(paste0(index, '_'), paste0(index, '_CCR_'), Rdatastem)
+    #         outRdatapath <- paste(dpath, 'forecasts', model, grid, if (seasonal) 'seasonal' else 'monthly', index, method, Rdatastem, sep='/')
+    #         if (!file.exists(outRdatapath)) dir.create(outRdatapath, recur=TRUE)
+    #         leads <- apply(outer(1:nrow(fcst.seas), 0:2, '+'), 1, paste, collapse='')
+    #         for (yi in yind){
+    #           for (li in seq(leads)){
+    #             fcst <- ffcst[li,,,,yi,drop=F]
+    #             ## tricky selection to make sure we select the right 
+    #             ## forecast probabilities for the forward method
+    #             prob <- fcst.prob[yi - min(yind) + 1,,li,,,drop=F]
+    #             fcst.time <- fcst.seastimes[li,yi]
+    #             save(fcst, prob, fcst.time,
+    #                  file=paste0(outRdatapath, '/', 
+    #                              Rdatastem, '_', years[yi], '_', leads[li], '.Rdata'))
+    #           }
+    #         }
+    #         ## save(fcst.seas, fcst.prob, fcst.seastimes, lon, lat, plon, plat, file=outRdata)  
+    #       }
+    
+    ## set up output file to write to
+    nc <- nc_open(obsfiles[1])
+    nc2 <- nc_open(fcfiles[1])
+    if (length(nc$dim) == 2){
+      ncells.nc <- nc$dim$ncells
+    } else if (length(grep('eobs', grid)) == 1){
+      lon.nc <- nc2$dim$rlon
+      lat.nc <- nc2$dim$rlat    
+    } else {
+      lon.nc <- nc2$dim$lon
+      lat.nc <- nc2$dim$lat
+    }
+    time.nc <- ncdim_def(name='time', 
+                         units='days since 1980-01-01', 
+                         vals=as.numeric(fcst.seastimes[, ncol(fcst.seastimes)] - as.Date('1980-01-01')),
+                         unlim=TRUE, 
+                         longname=if (seasonal) 'end date of 3-monthly seasons' else 'end date of month')
+    if (length(nc$dim) == 2){
+      dims.nc <- list(ncells.nc, time.nc)
+    } else {
+      dims.nc <- list(lon.nc, lat.nc, time.nc)      
+    }
+    ## create variables
+    vars.nc <- list()
+    ## check whether this is a rotated grid
+    if (length(grep('eobs', grid)) == 1){
+      vars.nc[['lon']] <- ncvar_def('lon', 'degrees_east', dims.nc[1:2], missval=-1e20, longname='longitude')
+      vars.nc[['lat']] <- ncvar_def('lat', 'degrees_north', dims.nc[1:2], missval=-1e20, longname='latitude')
+      vars.nc[['rotated_pole']] <- ncvar_def('rotated_pole', units='', dim=list(), missval=NULL, prec='char')    
+    } else if (length(nc$dim) == 2){
+      vars.nc[['lon']] <- nc$var$lon
+      vars.nc[['lat']] <- nc$var$lat
+    }
+    for (score in scores){
+      if (score == 'EnsRocss'){
+        for (i in 1:3) {
+          rscore <- paste0(score, '.cat', i)
+          vars.nc[[rscore]] <- ncvar_def(rscore, '1', dims.nc, missval=-1e20, longname=scorelist[[rscore]])
+          vars.nc[[paste0(rscore, '.sigma')]] <- ncvar_def(paste0(rscore, '.sigma'), '1',
+                                                           dims.nc, missval=-1e20,
+                                                           longname=scorelist[[rscore]])
+        }
+      } else if (score == 'CRPSdecomp'){
+        for (cii in c('CRPS', 'CRPSpot', 'Reli')){
+          rscore <- paste(score, cii, sep='.')
+          vars.nc[[rscore]] <- ncvar_def(rscore, '1', dims.nc, missval=-1e20, 
+                                         longname=scorelist[[rscore]])
+        }
       } else {
-        lon.nc <- nc2$dim$lon
-        lat.nc <- nc2$dim$lat
+        vars.nc[[score]] <- ncvar_def(score, '1', dims.nc, missval=-1e20, longname=scorelist[[score]])
+        if (score %in% c(scores[grep('pss$', scores)], 'EnsTrend', 'EnsCond', 'EnsVarlog')){
+          vars.nc[[paste(score, 'sigma', sep='.')]] <- ncvar_def(paste(score, 'sigma', sep='.'), '1', dims.nc, missval=-1e20, longname=scorelist[[score]])
+        } 
       }
-      time.nc <- ncdim_def(name='time', 
-                           units='days since 1980-01-01', 
-                           vals=as.numeric(fcst.seastimes[, ncol(fcst.seastimes)] - as.Date('1980-01-01')),
-                           unlim=TRUE, 
-                           longname=if (seasonal) 'end date of 3-monthly seasons' else 'end date of month')
-      if (length(nc$dim) == 2){
-        dims.nc <- list(ncells.nc, time.nc)
+    }
+    
+    
+    ## get additional information on content of files
+    fc.name <- sapply(strsplit(fcfiles, '/')[1], function(x) x[grep('EUPORIAS', x) + 1])
+    obs.name <- sapply(strsplit(obsfiles, '/')[1], function(x) x[grep('EUPORIAS', x) + 1])
+    ofile <- paste0(
+      paste(
+        paste0(index, 
+               ifelse(detrend, '_detrend', ''), 
+               ifelse(ind.cali, paste0('_', toupper(indmethod)), '')), 
+        method, fc.name, 'vs', obs.name, 
+        paste(range(names(fc.times)), collapse='-'), 
+        sep="_"), '_initmon', initmon, '.nc')
+    outfile <- paste(tmpdir, ofile, sep='/')
+    desc <- paste0('Skill in ', 
+                   ifelse(detrend, 'detrended ', ''), 
+                   ifelse(ind.cali, paste0('bias corrected (', indmethod, ')'), ''), 
+                   ifelse(seasonal, 'seasonal ', 'monthly '), 
+                   index, 
+                   ' from ', 
+                   ifelse(method == 'none', '', paste0('bias-corrected (', method, ') ')), 
+                   gsub('-', ' ', toupper(fc.name)), 
+                   ' forecasts verified against ', obs.name, 
+                   ' for ', paste(range(names(fc.times)[yind]), collapse='-'))
+    
+    ## create netcdf file
+    ncout <- nc_create(outfile, vars.nc)
+    ## write variables
+    if (length(nc$dim) == 2){
+      ncvar_put(ncout, varid='lon', ncvar_get(nc, 'lon'))
+      ncvar_put(ncout, varid='lat', ncvar_get(nc, 'lat'))
+    } else if (length(grep('eobs', grid)) == 1){
+      if ('Actual_longitude' %in% names(nc$var)){
+        ncvar_put(ncout, varid='lon', ncvar_get(nc, 'Actual_longitude'))
+        ncvar_put(ncout, varid='lat', ncvar_get(nc, 'Actual_latitude'))
       } else {
-        dims.nc <- list(lon.nc, lat.nc, time.nc)      
+        library(geocors)
+        plon <- ncatt_get(nc, 'rotated_pole', attname='grid_north_pole_longitude')$val
+        plat <- ncatt_get(nc, 'rotated_pole', attname='grid_north_pole_longitude')$val    
+        lola <- geocors.trafo(rep(nc$dim$rlon$vals, nc$dim$rlat$len), 
+                              rep(nc$dim$rlat$vals, each=nc$dim$rlon$len),
+                              from.type='rotpol', 
+                              from.pars=list(plon=as.numeric(plon), plat=as.numeric(plat)),
+                              to.type='lonlat')
+        ncvar_put(ncout, varid='lon', lola$lon)
+        ncvar_put(ncout, varid='lat', lola$lat)    
       }
-      ## create variables
-      vars.nc <- list()
-      ## check whether this is a rotated grid
-      if (length(grep('eobs', grid)) == 1){
-        vars.nc[['lon']] <- ncvar_def('lon', 'degrees_east', dims.nc[1:2], missval=-1e20, longname='longitude')
-        vars.nc[['lat']] <- ncvar_def('lat', 'degrees_north', dims.nc[1:2], missval=-1e20, longname='latitude')
-        vars.nc[['rotated_pole']] <- ncvar_def('rotated_pole', units='', dim=list(), missval=NULL, prec='char')    
-      } else if (length(nc$dim) == 2){
-        vars.nc[['lon']] <- nc$var$lon
-        vars.nc[['lat']] <- nc$var$lat
-      }
-      for (score in scores){
+      ## fill in the rotated grid coordinates
+      ncatt_put(ncout, varid='rotated_pole', attname='grid_mapping_name', 
+                attval='rotated_latitude_longitude', prec='text')
+      ncatt_put(ncout, varid='rotated_pole', attname='grid_north_pole_longitude', 
+                attval=-162, prec='double')
+      ncatt_put(ncout, varid='rotated_pole', attname='grid_north_pole_latitude', 
+                attval=39.25, prec='double')
+    }
+    ## add in a global attribute with description
+    ncatt_put(ncout, varid=0, attname='description', attval=desc, prec='text')
+    nc_close(ncout)
+    
+    ## compute scores and write to output file
+    for (score in scores){
+      ncout <- nc_open(outfile, write=TRUE)
+      print(score)
+      print(system.time( sfo <- scorefun(fcst.seas[,,,,yind, drop=F], obs.seas[,,,yind,drop=F], score, strategy=strategy)))
+      if (is.list(sfo)){
+        sfo <- lapply(sfo, function(x){
+          x[x == -Inf] <- -9999
+          x[abs(x) == Inf] <- NA
+          return(x)
+        })
         if (score == 'EnsRocss'){
-          for (i in 1:3) {
-            rscore <- paste0(score, '.cat', i)
-            vars.nc[[rscore]] <- ncvar_def(rscore, '1', dims.nc, missval=-1e20, longname=scorelist[[rscore]])
-            vars.nc[[paste0(rscore, '.sigma')]] <- ncvar_def(paste0(rscore, '.sigma'), '1',
-                                                             dims.nc, missval=-1e20,
-                                                             longname=scorelist[[rscore]])
+          for (i in 1:3){
+            ncvar_put(ncout, varid=paste0(score, '.cat', i), vals=aperm(sfo[[paste0('cat', i)]], c(2,3,1)))
+            ncvar_put(ncout, varid=paste0(score, '.cat', i, '.sigma'), vals=aperm(sfo[[paste0('cat', i, '.sigma')]], c(2,3,1)))
           }
-        } else if (score == 'CRPSdecomp'){
-          for (cii in c('CRPS', 'CRPSpot', 'Reli')){
-            rscore <- paste(score, cii, sep='.')
-            vars.nc[[rscore]] <- ncvar_def(rscore, '1', dims.nc, missval=-1e20, 
-                                           longname=scorelist[[rscore]])
+        } else if (score == 'CRPSdecomp') {
+          for (nn in names(sfo)){
+            ncvar_put(ncout, varid=paste(score, nn, sep='.'), 
+                      vals=aperm(sfo[[nn]], c(2,3,1)))
           }
         } else {
-          vars.nc[[score]] <- ncvar_def(score, '1', dims.nc, missval=-1e20, longname=scorelist[[score]])
-          if (score %in% c(scores[grep('pss$', scores)], 'EnsTrend', 'EnsCond', 'EnsVarlog')){
-            vars.nc[[paste(score, 'sigma', sep='.')]] <- ncvar_def(paste(score, 'sigma', sep='.'), '1', dims.nc, missval=-1e20, longname=scorelist[[score]])
-          } 
+          ncvar_put(ncout, varid=score, vals=aperm(sfo[[1]], c(2,3,1)))
+          ncvar_put(ncout, varid=paste(score, 'sigma', sep='.'), vals=aperm(sfo[[2]], c(2,3,1)))    
         }
+      } else {
+        ## set negative infinity (division by zero) to large negative value
+        sfo[sfo == -Inf] <- -9999
+        sfo[abs(sfo) == Inf] <- NA
+        ## write to output file
+        if (length(sfo) == length(obs.seas[,,,yind])){
+          sfo <- rowMeans(sfo, dims=3)
+        }
+        ncvar_put(ncout, varid=score, vals=aperm(sfo, c(2,3,1))) 
       }
+      nc_close(ncout)      
       
-      
-      ## get additional information on content of files
-      fc.name <- sapply(strsplit(fcfiles, '/')[1], function(x) x[grep('EUPORIAS', x) + 1])
-      obs.name <- sapply(strsplit(obsfiles, '/')[1], function(x) x[grep('EUPORIAS', x) + 1])
-      ofile <- paste0(paste(paste0(index, if (detrend) '_detrend' else '', if(is.ccr) '_CCR' else ''), method, fc.name, 'vs', obs.name, paste(range(names(fc.times)), collapse='-'), sep="_"), '_initmon', initmon, '.nc')
-      outfile <- paste(tmpdir, ofile, sep='/')
-      desc <- paste0('Skill in ', if (detrend) 'detrended ' else '', if (seasonal) 'seasonal ' else 'monthly ', index, ' from bias-corrected (', method, if (is.ccr) ' + CCR' else '', if (crossval) ' cross-validated' else '', ') ', gsub('-', ' ', toupper(fc.name)), ' forecasts verified against ', obs.name, ' for ', paste(range(names(fc.times)[yind]), collapse='-'))
-      
-      ## create netcdf file
-      ncout <- nc_create(outfile, vars.nc)
-      ## write variables
-      if (length(nc$dim) == 2){
-        ncvar_put(ncout, varid='lon', ncvar_get(nc, 'lon'))
-        ncvar_put(ncout, varid='lat', ncvar_get(nc, 'lat'))
-      } else if (length(grep('eobs', grid)) == 1){
-        if ('Actual_longitude' %in% names(nc$var)){
-          ncvar_put(ncout, varid='lon', ncvar_get(nc, 'Actual_longitude'))
-          ncvar_put(ncout, varid='lat', ncvar_get(nc, 'Actual_latitude'))
+      ## readjust grid specification for variables
+      ## this is very important to happen AFTER the file connection to the NetCDF
+      ## is closed from R - otherwise the output is shifted latitudinally
+      if (length(nc$dim) == 2 | length(grep('eobs', grid)) == 1){
+        if (length(nc$dim) == 2){
+          atts <- c(gridtype='unstructured', coordinates="lon lat")
         } else {
-          library(geocors)
-          plon <- ncatt_get(nc, 'rotated_pole', attname='grid_north_pole_longitude')$val
-          plat <- ncatt_get(nc, 'rotated_pole', attname='grid_north_pole_longitude')$val    
-          lola <- geocors.trafo(rep(nc$dim$rlon$vals, nc$dim$rlat$len), 
-                                rep(nc$dim$rlat$vals, each=nc$dim$rlon$len),
-                                from.type='rotpol', 
-                                from.pars=list(plon=as.numeric(plon), plat=as.numeric(plat)),
-                                to.type='lonlat')
-          ncvar_put(ncout, varid='lon', lola$lon)
-          ncvar_put(ncout, varid='lat', lola$lat)    
+          atts <- c(grid_mapping='rotated_pole')
         }
-        ## fill in the rotated grid coordinates
-        ncatt_put(ncout, varid='rotated_pole', attname='grid_mapping_name', 
-                  attval='rotated_latitude_longitude', prec='text')
-        ncatt_put(ncout, varid='rotated_pole', attname='grid_north_pole_longitude', 
-                  attval=-162, prec='double')
-        ncatt_put(ncout, varid='rotated_pole', attname='grid_north_pole_latitude', 
-                  attval=39.25, prec='double')
-      }
-      ## add in a global attribute with description
-      ncatt_put(ncout, varid=0, attname='description', attval=desc, prec='text')
-      nc_close(ncout)
-      
-      ## compute scores and write to output file
-      for (score in scores){
-        ncout <- nc_open(outfile, write=TRUE)
-        print(score)
-        print(system.time( sfo <- scorefun(fcst.seas[,,,,yind, drop=F], obs.seas[,,,yind,drop=F], score, strategy=strategy)))
-        if (is.list(sfo)){
-          sfo <- lapply(sfo, function(x){
-            x[x == -Inf] <- -9999
-            x[abs(x) == Inf] <- NA
-            return(x)
-          })
+        for (attn in names(atts)){
           if (score == 'EnsRocss'){
-            for (i in 1:3){
-              ncvar_put(ncout, varid=paste0(score, '.cat', i), vals=aperm(sfo[[paste0('cat', i)]], c(2,3,1)))
-              ncvar_put(ncout, varid=paste0(score, '.cat', i, '.sigma'), vals=aperm(sfo[[paste0('cat', i, '.sigma')]], c(2,3,1)))
-            }
-          } else if (score == 'CRPSdecomp') {
-            for (nn in names(sfo)){
-              ncvar_put(ncout, varid=paste(score, nn, sep='.'), 
-                        vals=aperm(sfo[[nn]], c(2,3,1)))
-            }
+            for (i in 1:3) system(paste0("ncatted -h -a ", attn, ",", score, ".cat", i, ",c,c,'",atts[attn],"' ", outfile))            
+          } else if (is.list(sfo)){
+            system(paste0("ncatted -h -a ", attn, ",", score, ".sigma,c,c,'",atts[attn],"' ", outfile))      
+            system(paste0("ncatted -h -a ", attn, ",", score, ",c,c,'",atts[attn],"' ", outfile))      
           } else {
-            ncvar_put(ncout, varid=score, vals=aperm(sfo[[1]], c(2,3,1)))
-            ncvar_put(ncout, varid=paste(score, 'sigma', sep='.'), vals=aperm(sfo[[2]], c(2,3,1)))    
-          }
-        } else {
-          ## set negative infinity (division by zero) to large negative value
-          sfo[sfo == -Inf] <- -9999
-          sfo[abs(sfo) == Inf] <- NA
-          ## write to output file
-          if (length(sfo) == length(obs.seas[,,,yind])){
-            sfo <- rowMeans(sfo, dims=3)
-          }
-          ncvar_put(ncout, varid=score, vals=aperm(sfo, c(2,3,1))) 
+            system(paste0("ncatted -h -a ", attn, ",", score, ",c,c,'",atts[attn],"' ", outfile))      
+          }                
         }
-        nc_close(ncout)      
-        
-        ## readjust grid specification for variables
-        ## this is very important to happen AFTER the file connection to the NetCDF
-        ## is closed from R - otherwise the output is shifted latitudinally
-        if (length(nc$dim) == 2 | length(grep('eobs', grid)) == 1){
-          if (length(nc$dim) == 2){
-            atts <- c(gridtype='unstructured', coordinates="lon lat")
-          } else {
-            atts <- c(grid_mapping='rotated_pole')
-          }
-          for (attn in names(atts)){
-            if (score == 'EnsRocss'){
-              for (i in 1:3) system(paste0("ncatted -h -a ", attn, ",", score, ".cat", i, ",c,c,'",atts[attn],"' ", outfile))            
-            } else if (is.list(sfo)){
-              system(paste0("ncatted -h -a ", attn, ",", score, ".sigma,c,c,'",atts[attn],"' ", outfile))      
-              system(paste0("ncatted -h -a ", attn, ",", score, ",c,c,'",atts[attn],"' ", outfile))      
-            } else {
-              system(paste0("ncatted -h -a ", attn, ",", score, ",c,c,'",atts[attn],"' ", outfile))      
-            }                
-          }
-        }
-        
-        ## make sure we free as much memory as possible/reasonable
-        rm(sfo, ncout)
-        gc()
-        
-        
-      } ## end of loop on scores
+      }
       
-      ## copy temporary file to permanent location
-      ## make sure the output directory exists
-      if (!file.exists(outdir)) dir.create(outdir, recursive=TRUE)
-      system(paste0('mv ', outfile, ' ', outdir, '/', ofile))
+      ## make sure we free as much memory as possible/reasonable
+      rm(sfo, ncout)
+      gc()
       
-    } ## end of loop on CCR
+      
+    } ## end of loop on scores
+    
+    ## copy temporary file to permanent location
+    ## make sure the output directory exists
+    if (!file.exists(outdir)) dir.create(outdir, recursive=TRUE)
+    system(paste0('mv ', outfile, ' ', outdir, '/', ofile))
+    
     
   } ## end of loop on detrend
   
