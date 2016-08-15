@@ -242,9 +242,12 @@ sapply(obs.con, nc_close)
 rm(fc.con, obs.con)
 
 ## get crossvalidation string
-crossval <- length(grep('crossval', method)) == 1
-suppressWarnings(nblock <- as.numeric(gsub('_.*', '', gsub('.*crossval', '', method))))
-
+strategy <- list(type=ifelse(length(grep('crossval', method)) == 1, 
+                             "crossval", "none"))
+if (strategy$type == "crossval"){
+  suppressWarnings(strategy$blocklength <- as.numeric(gsub('_.*', '', gsub('.*crossval', '', method))))
+}
+  
 ## loop through raw / CCR forecasts
 for (is.ccr in c(FALSE, TRUE)){
   

@@ -69,11 +69,16 @@ if (length(args) == 0 | mode(args) == 'function'){
             'ERA-INT',
             'tas', 
             'global2', 
-            'smooth', 
-            '05')
+            'smoothRecal-forward', 
+            '05',
+            '1981',
+            '2014')
 } else if (length(args) < 5){
   stop('Not enough command line arguments')
 }
+
+## decide whether to continue from previous computation
+pickup <- FALSE
 
 ## disaggregate command line arguments
 model <- args[1]
@@ -82,6 +87,13 @@ varname <- args[3]
 grid <- args[4]
 method <- args[5]
 initmon <- args[6]
+if (length(args) > 6){
+  startyear <- args[7]
+  endyear <- args[8]
+} else {
+  startyear <- 1981
+  endyear <- 2010
+}
 
 ## get file names
 dpath <- '/store/msclim/bhendj/EUPORIAS'
@@ -101,6 +113,10 @@ if (length(obsfiles) < 1) stop('no observation file found')
 
 ## set up temporary directory for output files
 tmpdir <- paste0(scratchdir, '/bias_correction_', method, '_initmon', initmon, '_', ceiling(runif(1)*1000))
+if (pickup) {
+  tmpdir <- c(list.files(scratchdir, paste0('bias_correction_', method, '_initmon', initmon, '_'), full.names=TRUE), tmpdir)[1]
+}
+
 if (!file.exists(tmpdir)) dir.create(tmpdir, recursive=TRUE)
 
 ## first get the time dimension of all forecasts
@@ -127,7 +143,7 @@ stopifnot(sum(duplicated(otimes)) == 0)
 ## now exclude all forecast years that are not fully present in obs
 is.in.obs <- sapply(fc.times, function(x) all(x %in% otimes)) 
 ## constrain years to 1981-, but use all years if less than 25 years are available
-if (sum(is.in.obs) > 25) is.in.obs <- is.in.obs & names(fc.times) %in% 1981:2010
+if (sum(is.in.obs) > 25) is.in.obs <- is.in.obs & names(fc.times) %in% startyear:endyear
 ## if (sum(is.in.obs) > 25) is.in.obs <- is.in.obs & names(fc.times) %in% 1981:2014
 
 
@@ -186,10 +202,21 @@ if (!file.exists(outpath)) dir.create(outpath, recursive=TRUE, mode='0775')
 outfiles <- gsub('\\_none.nc', paste0('_', method, '_', paste(yrange, collapse='-'), '_', obsname, '.nc'), sapply(strsplit(fcfiles, '/'), function(x) x[length(x)]))
 
 ## compute how many latitudes to read in at once
-latchunksize <- min(nlat,floor(5e8 / (nlon*maxnens*ntime*nyears)))
+latchunksize <- min(nlat,floor(6e8 / (nlon*maxnens*ntime*nyears)))
+
+if (pickup){
+  nctmp <- nc_open(paste(tmpdir, outfiles[length(fc.con)], sep='/'))
+  ftmp <- ncvar_get(nctmp, parfcs[length(fc.con)],
+                    start=c(1,1,1,1), count=c(1,-1,1,1))
+  nc_close(nctmp)
+  initlat <- min(sum(!is.na(ftmp)) + 1, nlat)
+} else {
+  initlat <- 1
+}
+
 
 ## loop on  latitude band
-for (lati in seq(1, nlat, latchunksize)){
+for (lati in seq(initlat, nlat, latchunksize)){
   
   ## get list of object names that are not deleted at end of iteration
   no.rm <- ls()
@@ -260,11 +287,15 @@ for (lati in seq(1, nlat, latchunksize)){
     mm <- gsub("-forward$", "", gsub('-crossval.*$', '', method))
     crossval <- length(grep('-crossval.*$', method)) == 1
     forward <- length(grep("-forward$", method)) == 1
-    if (crossval){
-      nblock <- as.numeric(gsub('.*-crossval', '', method))
+    block <- length(grep("-block.*$", method)) == 1
+    stopifnot(sum(crossval, forward, block) <= 1)
+    
+    strategy <- list(type=c("none", "crossval", "block", "forward")[1 + crossval*1 + block*2 + forward*3])
+    if (crossval | block){
+      nblock <- as.numeric(gsub(paste0('.*-', ifelse(crossval, 'crossval', 'block')), '', method))
       if (is.na(nblock)) nblock <- 1
+      strategy$blocklength <- nblock
     }
-    stopifnot(sum(crossval, forward) <= 1)
     
     fcst.debias <- array(NA, dim(fcst))
     for (loi in 1:nlon){
@@ -274,9 +305,7 @@ for (lati in seq(1, nlat, latchunksize)){
             fcst=aperm(fcst[debias.years,loi, lai,1:minnens,], c(3,1,2)),
             obs=t(obs[,loi,lai,]),
             method=mm,
-            crossval=crossval,
-            blocklength=nblock,
-            forward=forward,
+            strategy=strategy,
             fcst.out=aperm(fcst[,loi,lai,,], c(3,1,2)),
             fc.time=fc.timarr[, debias.years],
             fcout.time=fc.timarr,

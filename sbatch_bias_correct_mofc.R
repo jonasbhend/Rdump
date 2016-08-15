@@ -16,6 +16,9 @@ print(method)
 crossval <- length(grep("crossval", method)) == 1
 blocklength <- ifelse(crossval, as.numeric(gsub(".*crossval", "", method)), 1)
 forward <- length(grep("forward", method)) == 1
+strategy <- list(type=c("none", "crossval", "forward")[1 + 1*crossval + 2*forward],
+                 blocklength=blocklength)
+
 mofcpath <- dirname(fcfile)
 fileparts <- strsplit(fcfile, '/')[[1]]
 granularity <- fileparts[length(fileparts) - 3]
@@ -65,9 +68,7 @@ for (i in 1:nrow(fcst)){
       fcst.debias[i,j,,,] <- debias(fcst=fcst[i,j,,,], obs=obs[i,j,,],
                                     method=gsub("-.*", "", method), 
                                     fc.time=t(fc.time), 
-                                    crossval=crossval,
-                                    blocklength=blocklength,
-                                    forward=forward)
+                                    strategy=strategy)
     }
   }
 }

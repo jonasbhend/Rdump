@@ -221,6 +221,8 @@ crossval <- length(grep('crossval', method)) == 1
 suppressWarnings(nblock <- as.numeric(gsub('_.*', '', gsub('.*crossval', '', method))))
 forward <- length(grep("forward", method)) == 1
 stopifnot(sum(forward, crossval) <= 1)
+strategy <- list(type=c("none", "crossval", "forward")[1 + 1*crossval + 2*forward], 
+                 blocklength=nblock)
 
 ## loop over seasonal or monthly forecast skill
 for (seasonal in seasonals){
@@ -305,9 +307,7 @@ for (seasonal in seasonals){
                 obs=obs.seas[,loi,lai,which(years<2011)],
                 fcst.out=aperm(fcst.seas[,loi,lai,,], c(1,3,2)),
                 method='ccr', 
-                crossval=crossval,
-                blocklength=nblock, 
-                forward=forward), c(1,3,2))
+                strategy=strategy), c(1,3,2))
             } ## end of if on missing values in obs
           } ## end of loop on latitudes
         } ## end of loop on longitudes

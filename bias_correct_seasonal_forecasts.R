@@ -247,10 +247,12 @@ for (lati in seq(1, nlat, latchunksize)){
       if (max(obs, na.rm=T) < 100) obs <- obs + 273.15
     }
     mm <- gsub('-crossval.*$', '', method)
-    crossval <- length(grep('-crossval.*$', method)) == 1
+    strategy <- list(type=ifelse(length(grep('-crossval.*$', method)) == 1,
+                                 "crossval", "none"))
     if (crossval){
       nblock <- as.numeric(gsub('.*-crossval', '', method))
       if (is.na(nblock)) nblock <- 1
+      strategy$blocklength <- nblock
     }
     
     fcst.debias <- array(NA, dim(fcst))
@@ -261,8 +263,7 @@ for (lati in seq(1, nlat, latchunksize)){
             fcst=aperm(fcst[debias.years,loi, lai,,], c(3,1,2)),
             obs=t(obs[,loi,lai,]),
             method=mm,
-            crossval=crossval,
-            blocklength=nblock,
+            strategy=strategy,
             fcst.out=aperm(fcst[,loi,lai,,], c(3,1,2)),
             fc.time=fc.timarr[, debias.years],
             fcout.time=fc.timarr,

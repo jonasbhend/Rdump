@@ -5,7 +5,16 @@ library(methods) ## for processing with Rscript
 library(ncdf4) ## ncdf is deprecated but still supported
 library(biascorrection)
 ## library(veri)
+library(verification)
 library(easyVerification)
+
+CRPSdecomp <- function(ens, obs, ...){
+  cdec <- try(crpsDecomposition(obs, ens)[1:3], silent=TRUE)
+  if (class(cdec) == 'try-error'){
+    cdec <- list(CRPS=NA, CRPSpot=NA, Reli=NA)
+  }
+  return(cdec)
+}
 
 SpearCorr <- function(ens, obs, ...){
   cor(rowMeans(ens), obs, method='spearman', ...)
@@ -58,10 +67,6 @@ nc_time <- function(nc){
   return(t.out)
 }
 
-## scores <- c('Ens2AFC', 'EnsRpss', 'FairRpss', 'EnsCrpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'EnsSprErr', 'EnsRocss')
-
-## scores <- c('EnsTrend', 'EnsCond', 'EnsVarlog', 'FairCrps', 'Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
-scores <- c('Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
 
 ## scores <- c("Ens2AFC", "FairRpss", "EnsCorr", "SpearCorr")
 
@@ -89,7 +94,10 @@ scorelist <- list(Ens2AFC='generalized discrimination score',
                   FairSprErr='fair spread error ratio',
                   EnsRocss.cat1='ROC area skill score (lower tercile)',
                   EnsRocss.cat2='ROC area skill score (middle tercile)',
-                  EnsRocss.cat3='ROC area skill score (upper tercile)')
+                  EnsRocss.cat3='ROC area skill score (upper tercile)', 
+                  CRPSdecomp.CRPS='mean continuous ranked probability score',
+                  CRPSdecomp.CRPSpot='potential CRPS (Resolution - Uncertainty)', 
+                  CRPSdecomp.Reli='reliability term of the CRPS')
 
 
 ## scorefunction for use with veriApply
@@ -110,14 +118,15 @@ scratchdir <- Sys.getenv('SCRATCH')
 args <- commandArgs(trailingOnly=TRUE)
 ## check if there are any command line arguments
 if (length(args) == 0){
-  args <- c('DWD-CCLM4-8-21', 
-            'WFDEI',
-            'tasmax',
-            'EAF-22',
-            'fastqqmap_????-????_WFDEI',
-            '05',
+  args <- c('ecmwf-system4', 
+            'ERA-INT',
+            'ITV',
+            'global2',
+            'smooth-forward_1981-2014_ERA-INT',
+            '11',
+            'small',
             TRUE,
-            FALSE,
+            TRUE,
             FALSE)
 } else if (length(args) < 5){
   stop('Not enough command line arguments')
@@ -130,18 +139,32 @@ index <- args[3]
 grid <- args[4]
 method <- args[5]
 initmon <- args[6]
+if (length(args) > 6){
+  whatscores <- as.character(args[7])
+} else {
+  whatscores <- 'standard'
+}
 
-if (length(args) >= 8){
-  seasonals <- as.logical(args[7])
-  ccrs <- as.logical(args[8])
+if (length(args) >= 9){
+  seasonals <- as.logical(args[8])
+  ccrs <- as.logical(args[9])
 } else {
   seasonals <- c(FALSE, TRUE)
   ccrs <- c(FALSE, TRUE)
 }
-if (length(args) == 9){
-  detrends <- as.logical(args[9])
+if (length(args) == 10){
+  detrends <- as.logical(args[10])
 } else {
   detrends <- c(FALSE, TRUE)  
+}
+
+## check scores
+if (whatscores == 'full'){
+  scores <- c('EnsTrend', 'EnsCond', 'EnsVarlog', 'FairCrps', 'Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsRmse', 'EnsRmsess', 'FairSprErr', 'EnsRocss')
+} else if (whatscores == 'small') {
+  scores <- c("FairCrpss", "EnsCorr", "FairSprErr", "CRPSdecomp")
+} else if (whatscores == 'standard') {
+  scores <- c('Ens2AFC', 'FairRpss', 'FairCrpss', 'EnsCorr', 'EnsMe', 'EnsMse', 'EnsMae', 'EnsMsess', 'FairSprErr', 'EnsRocss')
 }
 
 
@@ -310,10 +333,21 @@ rm(fc.con, obs.con)
 
 ## get crossvalidation string
 crossval <- length(grep('crossval', method)) == 1
-suppressWarnings(nblock <- as.numeric(gsub('_.*', '', gsub('.*crossval', '', method))))
 forward <- length(grep("forward", method)) == 1
-stopifnot(sum(forward, crossval) <= 1)
-
+block <- length(grep("block", method)) == 1
+stopifnot(sum(forward, crossval, block) <= 1)
+strategy <- list(nfcst=length(fc.times),
+  type=c("none", 'crossval', 'block', 'forward')[1 + 1*crossval + 2*block + 3*forward])
+if (crossval | block) {
+  suppressWarnings(strategy$blocklength <- as.numeric(gsub('_.*', '', gsub('.*crossval', '', method))))
+  if (is.na(strategy$blocklength)) strategy$blocklength <- 1
+}
+if (strategy$type != "none"){
+  fcyears <- as.numeric(names(fc.times))
+  syears <- strsplit(method, '_')
+  syears <- as.numeric(strsplit(syears[[1]][length(syears[[1]]) - 1], '-')[[1]])
+  strategy$indices <- which(fcyears %in% syears[1]:syears[2])
+}
 ## loop over seasonal or monthly forecast skill
 for (seasonal in seasonals){
   
@@ -409,9 +443,7 @@ for (seasonal in seasonals){
                 obs=obs.seas[,loi,lai,which(years %in% myears)],
                 fcst.out=aperm(fcst.seas[,loi,lai,,], c(1,3,2)),
                 method='ccr', 
-                crossval=crossval,
-                blocklength=nblock, 
-                forward=forward, 
+                strategy=strategy, 
                 type= if(forward | crossval) "prediction" else "calibration"), c(1,3,2))
             } ## end of if on missing values in obs
           } ## end of loop on latitudes
@@ -495,11 +527,17 @@ for (seasonal in seasonals){
                                                              dims.nc, missval=-1e20,
                                                              longname=scorelist[[rscore]])
           }
+        } else if (score == 'CRPSdecomp'){
+          for (cii in c('CRPS', 'CRPSpot', 'Reli')){
+            rscore <- paste(score, cii, sep='.')
+            vars.nc[[rscore]] <- ncvar_def(rscore, '1', dims.nc, missval=-1e20, 
+                                           longname=scorelist[[rscore]])
+          }
         } else {
           vars.nc[[score]] <- ncvar_def(score, '1', dims.nc, missval=-1e20, longname=scorelist[[score]])
           if (score %in% c(scores[grep('pss$', scores)], 'EnsTrend', 'EnsCond', 'EnsVarlog')){
             vars.nc[[paste(score, 'sigma', sep='.')]] <- ncvar_def(paste(score, 'sigma', sep='.'), '1', dims.nc, missval=-1e20, longname=scorelist[[score]])
-          }      
+          } 
         }
       }
       
@@ -549,7 +587,7 @@ for (seasonal in seasonals){
       for (score in scores){
         ncout <- nc_open(outfile, write=TRUE)
         print(score)
-        print(system.time( sfo <- scorefun(fcst.seas[,,,,yind, drop=F], obs.seas[,,,yind,drop=F], score, ref.opts=if(crossval) list(crossval=TRUE, blocklength=nblock) else if (forward) "forward" else NULL)))
+        print(system.time( sfo <- scorefun(fcst.seas[,,,,yind, drop=F], obs.seas[,,,yind,drop=F], score, strategy=strategy)))
         if (is.list(sfo)){
           sfo <- lapply(sfo, function(x){
             x[x == -Inf] <- -9999
@@ -560,6 +598,11 @@ for (seasonal in seasonals){
             for (i in 1:3){
               ncvar_put(ncout, varid=paste0(score, '.cat', i), vals=aperm(sfo[[paste0('cat', i)]], c(2,3,1)))
               ncvar_put(ncout, varid=paste0(score, '.cat', i, '.sigma'), vals=aperm(sfo[[paste0('cat', i, '.sigma')]], c(2,3,1)))
+            }
+          } else if (score == 'CRPSdecomp') {
+            for (nn in names(sfo)){
+              ncvar_put(ncout, varid=paste(score, nn, sep='.'), 
+                        vals=aperm(sfo[[nn]], c(2,3,1)))
             }
           } else {
             ncvar_put(ncout, varid=score, vals=aperm(sfo[[1]], c(2,3,1)))
