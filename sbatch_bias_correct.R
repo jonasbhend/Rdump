@@ -65,14 +65,13 @@ args <- commandArgs(trailingOnly=TRUE)
 
 ## check if there are any command line arguments
 if (length(args) == 0 | mode(args) == 'function'){
-  args <- c('ecmwf-system4', 
-            'ERA-INT',
-            'tas', 
-            'global2', 
-            'smoothRecal-forward', 
-            '05',
-            '1981',
-            '2014')
+  args <- c('UCAN-PP-LR-15PC', 
+            'E-OBS',
+            'tasmin', 
+            'UK', 
+            'fastqqmap', 
+            '11',
+            '1981-2010')
 } else if (length(args) < 5){
   stop('Not enough command line arguments')
 }
@@ -88,8 +87,14 @@ grid <- args[4]
 method <- args[5]
 initmon <- args[6]
 if (length(args) > 6){
-  startyear <- args[7]
-  endyear <- args[8]
+  if (args[7] == "????-????"){
+    startyear <- 1981
+    endyear <- 2010
+  } else {
+    syear <- strsplit(args[7], '-')
+    startyear <- as.numeric(syear[[1]][1])
+    endyear <- as.numeric(syear[[1]][2])
+  }
 } else {
   startyear <- 1981
   endyear <- 2010
@@ -139,6 +144,7 @@ names(fc.times) <- sapply(fc.times, function(x) format(x[1], '%Y'))
 obs.times <-lapply(obs.con, function(x) as.Date(nc_time(x)))
 otimes <- as.Date(unlist(sapply(obs.times, format, '%Y-%m-%d')))
 stopifnot(sum(duplicated(otimes)) == 0)
+
 
 ## now exclude all forecast years that are not fully present in obs
 is.in.obs <- sapply(fc.times, function(x) all(x %in% otimes)) 
@@ -192,6 +198,8 @@ nyears <- length(fcfiles)
 ## name from observations
 parobs <- names(obs.con[[1]]$var)[names(obs.con[[1]]$var) %in% varlist[[varname]]]
 
+## get units
+ounits <- ncatt_get(obs.con[[1]], parobs, attname='units')
 
 
 ## set up output directory
@@ -236,10 +244,10 @@ for (lati in seq(initlat, nlat, latchunksize)){
     } else {
       obs.tmp <- ncvar_get(obs.con[[1]], varid=parobs, start=c(1,lati,obs.i[1]), count=c(nlon,nchunk,diff(obs.i) + 1))      
     }
-    if (nchunk == 1){
-      for (fi in seq(along=debias.years)) obs[fi,,,] <- obs.tmp[,obs.tim %in% fc.times[[fi]]]  
+    if (length(dim(obs.tmp)) == 2){
+      for (fi in seq(along=debias.years)) obs[fi,,,] <- obs.tmp[,obs.tim %in% fc.times[[debias.years[fi]]]] 
     } else {
-      for (fi in seq(along=debias.years)) obs[fi,,,] <- obs.tmp[,,obs.tim %in% fc.times[[fi]]]        
+      for (fi in seq(along=debias.years)) obs[fi,,,] <- obs.tmp[,,obs.tim %in% fc.times[[debias.years[fi]]]]        
     }
     rm(obs.tmp)
     gc()
@@ -300,7 +308,7 @@ for (lati in seq(initlat, nlat, latchunksize)){
     fcst.debias <- array(NA, dim(fcst))
     for (loi in 1:nlon){
       for (lai in 1:nchunk){
-        if (all(!is.na(obs[,loi,lai,]) & all(!is.na(fcst[debias.years, loi, lai,1:minnens,])))){
+        if (any(!is.na(obs[,loi,lai,]) & apply(!is.na(fcst[debias.years, loi, lai,1:minnens,]), c(1,3), all))){
           fcst.debias[,loi,lai,,] <- aperm(debias(
             fcst=aperm(fcst[debias.years,loi, lai,1:minnens,], c(3,1,2)),
             obs=t(obs[,loi,lai,]),
@@ -350,6 +358,13 @@ for (lati in seq(initlat, nlat, latchunksize)){
                append=TRUE, 
                start=starti,
                count=counti)
+      ## fix output units (will be in units of the observations after BC)
+      if (ounits$hasatt){
+        ncout <- nc_open(paste(tmpdir, outfiles[fi], sep='/'), write=TRUE)
+        ncatt_put(ncout, parfcs[fi], attname='units', attval=ounits$value)
+        nc_close(ncout)
+      }
+            
     } ## end of loop on years
   }) ## system time for writing
   print(comp.time[['write']][[paste(lati)]])
