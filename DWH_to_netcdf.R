@@ -54,9 +54,16 @@ if (nchar(period) == 6){
 } else if (grepl("-", period)){
   period <- strsplit(period, "-")[[1]]
 }
+if (fixperiod){
+  perstring <- paste(format(as.Date(period, format = '%Y%m%d') - c(0,1),
+                            '%Y%m%d'), collapse='-')
+} else {
+  perstring <- paste(period, collapse = '-')
+}
+
 if (outfile == ""){
   outfile <- paste0("/store/msclim/bhendj/tmp/DWH/",
-                    paste(param, paste(period, collapse ='-'), msstring, sep='_'),
+                    paste(param, perstring, msstring, sep='_'),
                     ".nc")
 }
 
@@ -77,7 +84,7 @@ out <- dwhget(stats = 'all',
               stat.id.type = 'station_id',
               additional.output = c("owner.id", "owner.name", "use.limitation.id")) %>%
   as_tibble() %>%
-  mutate(time = as.POSIXct(as.character(time), format = '%Y%m%d%H%M'))
+  mutate(time = as.POSIXct(as.character(time), format = '%Y%m%d%H%M', tz='UTC'))
 
 ## hack to get rid of 00UTC from next month
 if (fixperiod){
@@ -130,21 +137,24 @@ stopifnot(as.character(stat.meta$station_id) == colnames(out.arr))
 reftime <- min(out.wide$time)
 tdiff <- as.numeric(difftime(out.wide$time, reftime, units = "hours"))
 time.nc <- ncdim_def("time",
-                     paste("hours since", format(reftime, "%Y-%m-%d %H:%M:%S")),
+                     paste("hours since", format(reftime, "%Y-%m-%d %H:%M:%S %Z")),
                      tdiff,
                      unlim=TRUE,
                      longname = 'time of measurement')
-station.nc <- ncdim_def('station',
+## station.nc <- ncdim_def('station',
+##                         '',
+##                         1:nrow(stat.meta),
+##                         create_dimvar=FALSE)
+station.nc <- ncdim_def('station_id',
                         '',
-                        1:nrow(stat.meta),
-                        create_dimvar=FALSE)
+                        stat.meta[['station_id']])
 
 
 ## get number of characters necessary for the meta information
 charnames <- stat.meta %>%
   select_if(is.character) %>%
   names()
-numnames <- setdiff(names(stat.meta), charnames)
+numnames <- setdiff(names(stat.meta), c(charnames, 'station_id'))
 nchars <- sapply(stat.meta %>%
   select_if(is.character), function(x) max(nchar(x), na.rm=T))
 
@@ -186,7 +196,8 @@ ncvar_put(ncout, param, t(out.arr))
 standard_names <- c(lon = 'longitude', lat='latitude', height='altitude')
 for (sn in names(standard_names)) ncatt_put(ncout, sn, "standard_name", standard_names[sn], prec = 'text')
 ncatt_put(ncout, param, "coordinates",
-          paste(names(stat.meta), collapse = " "), prec = 'text')
+          paste(setdiff(names(stat.meta), 'station_id'), collapse = " "),
+          prec = 'text')
 ncatt_put(ncout, 'station_id', "cf_role", "timeseries_id", prec='text')
 
 ## put global attributes
