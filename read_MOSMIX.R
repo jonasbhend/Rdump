@@ -1,16 +1,85 @@
-library(methods)
-library(maps)
-library(sp)
-library(dplyr)
-library(tibble)
+#!/usr/bin/env Rscript 
+
+args <- commandArgs(TRUE)
+if (length(args) != 2){
+  cat(
+"
+Usage: read_MOSMIX.R <infile> <outfile>
+      
+This script converts (compressed) MOSMIX fimos files into netcdf. If the 
+outfile contains cosmoe, then MOSMIX stations in the COSMO-E domain will 
+be processed, else only MOSMIX stations in Switzerland are processed.
+"
+  )
+  q(save = "no")
+}
+
+
+
+point_in_region <- function(lo, la, region = NULL) {
+  if (is.null(region)) return(rep(TRUE, length(lo)))
+  if (is.character(region)) region <- sanitizePolygon(maps::map(regions = region, plot = FALSE))
+  
+  if (all(sapply(region, length) == 2)){
+    lo > min(region$x) & lo < max(region$x) & la > min(region$y) & la < max(region$y)
+  } else {
+    sp::point.in.polygon(lo, la, region$x, region$y) == 1
+  }
+}
+
+
+
+## new strategy to read all of the long-range MOSMIX files
+read_mosmix <- function(file, region = NULL) {
+  
+  rr <- vroom::vroom_lines(file)
+  nrows <- 115
+  rrind <- seq(1, length(rr), by = nrows + 2)
+  rrmeta <- rr[rrind] %>%
+    readr::read_table(
+      col_names = c("x1", "wmo_ind", "datetime", "x2", "x3", "lat", "lon", "height", "type")
+    ) %>%
+    dplyr::mutate(lon = deg2dec(lon),
+                  lat = deg2dec(lat),
+                  rowind = rrind) %>%
+    dplyr::filter(point_in_region(lon, lat, region))
+  
+  rrmeta$data <- lapply(
+    rrmeta$rowind,
+    function(i) {
+      rr_matrix <- rr[seq(i + 1, by = 1, length = nrows)] %>%
+        strsplit("\\s+") %>%
+        sapply(as.numeric)
+      rr_matrix[rr_matrix < -9000] <- NA
+      rr_matrix[1,2] <- 0 # set analysis time to zero (hour is present in meta data)
+      out <- rr_matrix[-1,] %>%
+        tibble::as_tibble() %>%
+        stats::setNames(rr_matrix[1,]) %>%
+        dplyr::rename(lead = `9997`)
+    }
+  )
+  rrmeta
+}
+
+
+
+
+
+
+
 
 ## file <- '/store/msclim/bhendj/tmp/mixfimos_2017063010'
-files <- list.files("/store/msclim/NWP/MOSMIX/burglind", full.names=TRUE)
+# files <- list.files("/store/msclim/NWP/MOSMIX/burglind", full.names=TRUE)
+files <- list.files(
+  "/store/msclim/NWP/MOSMIX/hourly_temp",
+  "mos_mix_20.*[0-9].gz$",
+  full.names = TRUE
+)
 file <- files[1]
 swiss <- list(x=c(5.5, 11)[c(1,2,2,1,1)], y=c(45.5, 48)[c(1,1,2,2,1)])
-cosmo_small <- list(x=c(1.425, 15.825)[c(1,2,2,1,1)], y=c(43.1, 49.44)[c(1,1,2,2,1)])
-cosmo <- list(x=c(0.15, 16.75), y=c(42.65, 49.75))
-
+##cosmo_small <- list(x=c(1.425, 15.825)[c(1,2,2,1,1)], y=c(43.1, 49.44)[c(1,1,2,2,1)])
+##cosmo <- list(x=c(0.15, 16.75), y=c(42.65, 49.75))
+cosmoe <- list(x = c(5.3, 10.9), y = c(45.49, 48.1))
 
 deg2dec <- function(x){
   x %/% 100 + x %% 100 / 60
@@ -51,7 +120,7 @@ readHeader <- function(f){
              nrow=as.numeric(nrow),
              ntime=as.numeric(ntime))
     return(dd)
-  }   
+  }
 }
 
 read_fimosloc <- function(file){
@@ -74,7 +143,7 @@ read_fimos <- function(file, region = 'Switzerland'){
   stopifnot(file.exists(file))
   f <- gzfile(file, "r")
   on.exit(close(f))
-
+  
   if (!is.null(region)){
     if (is.character(region)){
       lola <- sanitizePolygon(maps::map(regions=region, plot=FALSE))
@@ -85,7 +154,7 @@ read_fimos <- function(file, region = 'Switzerland'){
   
   out <- list()
   for (i in 1:1e5){
-  
+    
     h1 <- readHeader(f)
     if (length(h1) == 0) break
     
@@ -103,13 +172,13 @@ read_fimos <- function(file, region = 'Switzerland'){
       data[data < -9000] <- NA
       dd <- as_tibble(data[-(1:2),])
       names(dd) <- data[1,]
-      dd <- dd[apply(!is.na(dd), 1, any), ]        
+      dd <- dd[apply(!is.na(dd), 1, any), ]
       odat <- as_tibble(cbind(h1[,c("id", "date", "lon", "lat", "height")],
                               tibble(lead = h2[-(1:2)]),
-                              dd))  
+                              dd))
       t1 <- suppressWarnings(readLines(f, n=1))
       stopifnot(substr(t1, 1, 4) == "9999")
-    
+      
       out[[h1[['id']][1]]] <- odat
     } else {
       tmp <- suppressWarnings(readLines(f, n=h1$nrow[1] + 2))
@@ -128,7 +197,7 @@ library(ncdf4)
 library(rgeos)
 library(maptools)
 
-switzerland <- map2SpatialPolygons(sanitizePolygon(maps::map(region = 'Switzerland', plot=FALSE)), 
+switzerland <- map2SpatialPolygons(sanitizePolygon(maps::map(region = 'Switzerland', plot=FALSE)),
                                    IDs = 'Switzerland')
 switzerland_buffer <- gBuffer(switzerland, width=0.044, byid=TRUE)
 sp2coord <- function(x) {
@@ -144,7 +213,7 @@ if (!file.exists(fimosfile)){
   fimos_dict <- read.table("/store/msclim/NWP/MOSMIX/fimos_dict.csv", header=TRUE) %>% as_tibble() %>%
     mutate(name = gsub("_", "", name), unit = gsub("-", "1", unit))
   save(fimos_dict, file = fimosfile)
-} 
+}
 
 
 
@@ -152,11 +221,11 @@ if (!file.exists(fimosfile)){
 fimos <- function(file, region=NULL){
   ## load the dictionary
   load(fimosfile)
-
+  
   stopifnot(file.exists(file))
   f <- gzfile(file, "r")
   on.exit(close(f))
-
+  
   if (!is.null(region)){
     cfun <- function(lo, la, x, y){
       sp::point.in.polygon(lo, la, x, y)
@@ -165,7 +234,7 @@ fimos <- function(file, region=NULL){
       lola <- sanitizePolygon(maps::map(regions=region, plot=FALSE))
     } else {
       lola <- region
-      if (all(sapply(lola, length)) == 2){
+      if (all(sapply(lola, length) == 2)){
         cfun <- function(lo, la, x, y){
           min(diff(sign(x - lo)), diff(sign(y - la)))/2
         }
@@ -176,17 +245,17 @@ fimos <- function(file, region=NULL){
   dd <- hh <- list()
   j <- 0
   for (i in 1:1e5){
-  
+    
     h1 <- readHeader(f)
     if (length(h1) == 0) break
-
+    
     ## check lat lon
     if (!is.null(region)){
       p.in.poly <- cfun(h1$lon, h1$lat, lola$x, lola$y)
     } else {
       p.in.poly <- 1
     }
-       
+    
     if (p.in.poly > 0) {
       j <- j + 1
       h2 <- scan(f, nlines=1, quiet=TRUE)
@@ -203,7 +272,7 @@ fimos <- function(file, region=NULL){
       tmp <- suppressWarnings(readLines(f, n=h1$nrow[1] + 2))
     }
   }
-
+  
   nns <- unique(unlist(sapply(dd, colnames)))
   fimel <- as.character(filter(fimos_dict, element %in% nns)$element)
   oo <- sapply(fimel, function(nn) {
@@ -211,22 +280,22 @@ fimos <- function(file, region=NULL){
     out[out < filter(fimos_dict, element == nn)$lower[1]] <- NA
     out[out > filter(fimos_dict, element == nn)$upper[1]] <- NA
     out},
-               simplify=FALSE)
-
+    simplify=FALSE)
+  
   return(list(data=oo,
               header = bind_rows(hh),
               dict = filter(fimos_dict, element %in% fimel)))
 }
 
-  
+
 
 fimos_to_netcdf <- function(infile, outfile, region=NULL){
   ff <- fimos(infile, region=region)
-
+  
   ## fix duplicated variable names
   fn <- names(ff$data)
   names(ff$data)[duplicated(fn)] <- as.character(as.numeric(fn[duplicated(fn)]) + 1000)
-
+  
   fe <- ff$dict$element
   ff$dict$element[duplicated(fe)] <- fe[duplicated(fe)] + 1000
   
@@ -238,7 +307,7 @@ fimos_to_netcdf <- function(infile, outfile, region=NULL){
                    basename(outfile), sep='/')
   dir.create(dirname(tmpfile), showWarnings=FALSE,
              recursive=TRUE, mode='0755')
-
+  
   ## create NetCDF variables
   init <- as.POSIXct(ff$header$date[1], format = '%Y%m%d%H', tz='UTC')
   time.nc <- ncdim_def('leadtime',
@@ -268,7 +337,7 @@ fimos_to_netcdf <- function(infile, outfile, region=NULL){
            name = gsub("<", "_below_", name),
            name = gsub("\\/10.m$", "", name),
            name = gsub("\\/", "_per_", name))
-
+  
   ## set up station variables
   vars.nc <- list(ncvar_def("id", "",
                             list(nchar.nc, ncell.nc),
@@ -285,10 +354,10 @@ fimos_to_netcdf <- function(infile, outfile, region=NULL){
                             paste("hours since", format(init, '%Y-%m-%d %H:%M:%S')),
                             list(),
                             missval=NULL))
-
+  
   vars.nc <- c(vars.nc, sapply(names(ff$data), function(nn){
     dd <- filter(ff$dict, element == nn)
-    ncvar_def(dd$name, dd$unit, dim.nc, missval=-1e20, compression=4) 
+    ncvar_def(dd$name, dd$unit, dim.nc, missval=-1e20, compression=4)
   }, simplify=FALSE))
   
   ## write data to file
@@ -318,18 +387,16 @@ fimos_to_netcdf <- function(infile, outfile, region=NULL){
               prec = "text")
   }
   nc_close(ncout)
-
+  
   dir.create(dirname(outfile), showWarnings=FALSE,
-              recursive=TRUE, mode = "0755")
+             recursive=TRUE, mode = "0755")
   system(paste("mv", tmpfile, outfile))
   file.remove(dirname(tmpfile))
   
 }
-  
-args <- commandArgs(TRUE)
-is.cosmo <- grepl("cosmo", args[2])
-if (length(args) == 2){
-  fimos_to_netcdf(args[1], args[2], if (is.cosmo) cosmo else switzerland_buffer)
-  q(save = 'no')
-}
+
+## execute script with input and output
+is.cosmo <- grepl("cosmoe", args[2])
+fimos_to_netcdf(args[1], args[2], if (is.cosmo) cosmoe else switzerland_buffer)
+q(save = 'no')
 
